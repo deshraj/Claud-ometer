@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useSessions } from '@/lib/hooks';
 import { formatCost, formatDuration, timeAgo, formatTokens } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,9 +19,38 @@ function useDebounce(value: string, delay: number) {
 }
 
 export default function SessionsPage() {
-  const [searchQuery, setSearchQuery] = useState('');
+  return (
+    <Suspense fallback={
+      <div className="flex h-[80vh] items-center justify-center">
+        <div className="space-y-3 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Loading sessions...</p>
+        </div>
+      </div>
+    }>
+      <SessionsContent />
+    </Suspense>
+  );
+}
+
+function SessionsContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const debouncedQuery = useDebounce(searchQuery, 300);
   const { data: sessions, isLoading } = useSessions(100, 0, debouncedQuery);
+
+  // Sync debounced query to URL
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (debouncedQuery) {
+      params.set('q', debouncedQuery);
+    } else {
+      params.delete('q');
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/sessions?${qs}` : '/sessions', { scroll: false });
+  }, [debouncedQuery, router, searchParams]);
 
   if (isLoading || !sessions) {
     return (

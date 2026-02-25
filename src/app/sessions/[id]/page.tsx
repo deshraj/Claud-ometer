@@ -15,22 +15,33 @@ import { format } from 'date-fns';
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data: session, isLoading } = useSessionDetail(id);
+  const { data: session, isLoading, error } = useSessionDetail(id);
 
-  if (isLoading || !session) {
+  if (isLoading || !session || !session.id) {
     return (
       <div className="flex h-[80vh] items-center justify-center">
         <div className="space-y-3 text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading session...</p>
+          {error ? (
+            <p className="text-sm text-muted-foreground">Session not found.</p>
+          ) : (
+            <>
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <p className="text-sm text-muted-foreground">Loading session...</p>
+            </>
+          )}
         </div>
       </div>
     );
   }
 
-  const topTools = Object.entries(session.toolsUsed)
+  const topTools = Object.entries(session.toolsUsed || {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
+
+  const models = session.models || [];
+  const messages = session.messages || [];
+  const compaction = session.compaction || { compactions: 0, microcompactions: 0, totalTokensSaved: 0, compactionTimestamps: [] };
+  const compactionCount = compaction.compactions + compaction.microcompactions;
 
   return (
     <div className="space-y-6">
@@ -44,7 +55,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold tracking-tight">{session.projectName}</h1>
-            {session.models.map(m => (
+            {models.map(m => (
               <Badge key={m} variant="secondary" className="text-xs">
                 {m}
               </Badge>
@@ -100,10 +111,10 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             <p className="text-[10px] text-muted-foreground">Est. Cost</p>
           </CardContent>
         </Card>
-        <Card className={`border-border/50 shadow-sm ${session.compaction.compactions + session.compaction.microcompactions > 0 ? 'border-amber-300/50 bg-amber-50/30' : ''}`}>
+        <Card className={`border-border/50 shadow-sm ${compactionCount > 0 ? 'border-amber-300/50 bg-amber-50/30' : ''}`}>
           <CardContent className="p-3 text-center">
             <Minimize2 className="h-3.5 w-3.5 mx-auto mb-1 text-muted-foreground" />
-            <p className="text-lg font-bold">{session.compaction.compactions + session.compaction.microcompactions}</p>
+            <p className="text-lg font-bold">{compactionCount}</p>
             <p className="text-[10px] text-muted-foreground">Compactions</p>
           </CardContent>
         </Card>
@@ -118,7 +129,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             </CardHeader>
             <CardContent className="pt-0 max-h-[600px] overflow-y-auto">
               <div className="space-y-4">
-                {session.messages.map((msg, i) => (
+                {messages.map((msg, i) => (
                   <div key={i} className="flex gap-3">
                     <div className={`mt-0.5 flex-shrink-0 rounded-lg p-1.5 ${
                       msg.role === 'user' ? 'bg-primary/10' : 'bg-muted'
@@ -214,7 +225,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           )}
 
           {/* Compaction Details */}
-          {(session.compaction.compactions > 0 || session.compaction.microcompactions > 0) && (
+          {compactionCount > 0 && (
             <Card className="border-amber-300/50 bg-amber-50/30 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
@@ -225,29 +236,29 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               <CardContent className="pt-0 space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">Full Compactions</span>
-                  <span className="font-bold">{session.compaction.compactions}</span>
+                  <span className="font-bold">{compaction.compactions}</span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">Micro-compactions</span>
-                  <span className="font-bold">{session.compaction.microcompactions}</span>
+                  <span className="font-bold">{compaction.microcompactions}</span>
                 </div>
-                {session.compaction.totalTokensSaved > 0 && (
+                {compaction.totalTokensSaved > 0 && (
                   <>
                     <Separator />
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">Tokens Saved</span>
                       <span className="font-bold text-green-600">
-                        {formatTokens(session.compaction.totalTokensSaved)}
+                        {formatTokens(compaction.totalTokensSaved)}
                       </span>
                     </div>
                   </>
                 )}
-                {session.compaction.compactionTimestamps.length > 0 && (
+                {(compaction.compactionTimestamps || []).length > 0 && (
                   <>
                     <Separator />
                     <div className="space-y-1">
                       <span className="text-[10px] text-muted-foreground font-medium">Timeline</span>
-                      {session.compaction.compactionTimestamps.map((ts, i) => (
+                      {compaction.compactionTimestamps.map((ts, i) => (
                         <div key={i} className="text-[10px] text-muted-foreground font-mono">
                           {format(new Date(ts), 'h:mm:ss a')}
                         </div>

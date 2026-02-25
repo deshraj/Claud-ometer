@@ -1,7 +1,10 @@
 import useSWR from 'swr';
 import type { DashboardStats, ProjectInfo, SessionInfo, SessionDetail } from '@/lib/claude-data/types';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = (url: string) => fetch(url).then(r => {
+  if (!r.ok) throw new Error(`API error: ${r.status}`);
+  return r.json();
+});
 
 export function useStats() {
   return useSWR<DashboardStats>('/api/stats', fetcher);

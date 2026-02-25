@@ -11,8 +11,11 @@ export function useProjects() {
   return useSWR<ProjectInfo[]>('/api/projects', fetcher);
 }
 
-export function useSessions(limit = 50, offset = 0) {
-  return useSWR<SessionInfo[]>(`/api/sessions?limit=${limit}&offset=${offset}`, fetcher);
+export function useSessions(limit = 50, offset = 0, query = '') {
+  const url = query
+    ? `/api/sessions?q=${encodeURIComponent(query)}&limit=${limit}`
+    : `/api/sessions?limit=${limit}&offset=${offset}`;
+  return useSWR<SessionInfo[]>(url, fetcher);
 }
 
 export function useProjectSessions(projectId: string) {

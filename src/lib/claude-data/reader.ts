@@ -351,6 +351,74 @@ export async function getSessionDetail(sessionId: string): Promise<SessionDetail
   return null;
 }
 
+export function searchSessions(query: string, limit = 50): SessionInfo[] {
+  if (!query.trim()) return getSessions(limit, 0);
+
+  const lowerQuery = query.toLowerCase();
+  const matchingSessions: SessionInfo[] = [];
+
+  if (!fs.existsSync(getProjectsDir())) return [];
+  const projectEntries = fs.readdirSync(getProjectsDir());
+
+  for (const entry of projectEntries) {
+    const projectPath = path.join(getProjectsDir(), entry);
+    if (!fs.statSync(projectPath).isDirectory()) continue;
+
+    const jsonlFiles = fs.readdirSync(projectPath).filter(f => f.endsWith('.jsonl'));
+    for (const file of jsonlFiles) {
+      const filePath = path.join(projectPath, file);
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      const lines = fileContent.split('\n').filter(Boolean);
+
+      let hasMatch = false;
+      for (const line of lines) {
+        try {
+          const msg = JSON.parse(line) as SessionMessage;
+          if (msg.type === 'user' && msg.message?.role === 'user') {
+            const content = msg.message.content;
+            if (typeof content === 'string' && content.toLowerCase().includes(lowerQuery)) {
+              hasMatch = true;
+              break;
+            }
+            if (Array.isArray(content)) {
+              for (const c of content) {
+                if (c && typeof c === 'object' && 'type' in c && c.type === 'text' && 'text' in c) {
+                  if ((c.text as string).toLowerCase().includes(lowerQuery)) {
+                    hasMatch = true;
+                    break;
+                  }
+                }
+              }
+              if (hasMatch) break;
+            }
+          }
+          if (msg.type === 'assistant' && msg.message?.content) {
+            const content = msg.message.content;
+            if (Array.isArray(content)) {
+              for (const c of content) {
+                if (c && typeof c === 'object' && 'type' in c && c.type === 'text' && 'text' in c) {
+                  if ((c.text as string).toLowerCase().includes(lowerQuery)) {
+                    hasMatch = true;
+                    break;
+                  }
+                }
+              }
+              if (hasMatch) break;
+            }
+          }
+        } catch { /* skip */ }
+      }
+
+      if (hasMatch) {
+        matchingSessions.push(parseSessionFile(filePath, entry, projectIdToName(entry)));
+      }
+    }
+  }
+
+  matchingSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return matchingSessions.slice(0, limit);
+}
+
 export function getDashboardStats(): DashboardStats {
   const stats = getStatsCache();
   const projects = getProjects();

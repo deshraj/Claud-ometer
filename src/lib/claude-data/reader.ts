@@ -12,6 +12,8 @@ import type {
   SessionDetail,
   SessionMessageDisplay,
   DashboardStats,
+  DailyActivity,
+  DailyModelTokens,
   TokenUsage,
   SessionMessage,
 } from './types';
@@ -419,10 +421,203 @@ export function searchSessions(query: string, limit = 50): SessionInfo[] {
   return matchingSessions.slice(0, limit);
 }
 
+// --- Supplemental stats: bridge stale stats-cache.json with fresh JSONL data ---
+
+interface SupplementalStats {
+  dailyActivity: DailyActivity[];
+  dailyModelTokens: DailyModelTokens[];
+  modelUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>;
+  hourCounts: Record<string, number>;
+  totalSessions: number;
+  totalMessages: number;
+  totalTokens: number;
+  estimatedCost: number;
+}
+
+let supplementalCache: { key: string; data: SupplementalStats; ts: number } | null = null;
+const SUPPLEMENTAL_TTL_MS = 30_000;
+
+function getRecentSessionFiles(afterDate: string): string[] {
+  const projectsDir = getProjectsDir();
+  if (!fs.existsSync(projectsDir)) return [];
+
+  const cutoff = afterDate ? new Date(afterDate + 'T23:59:59Z').getTime() : 0;
+  const files: string[] = [];
+
+  for (const entry of fs.readdirSync(projectsDir)) {
+    const projectPath = path.join(projectsDir, entry);
+    if (!fs.statSync(projectPath).isDirectory()) continue;
+
+    for (const f of fs.readdirSync(projectPath).filter(f => f.endsWith('.jsonl'))) {
+      const filePath = path.join(projectPath, f);
+      if (fs.statSync(filePath).mtimeMs > cutoff) {
+        files.push(filePath);
+      }
+    }
+  }
+
+  return files;
+}
+
+function computeSupplementalStats(afterDate: string): SupplementalStats {
+  const cacheKey = afterDate + ':' + getActiveDataSource();
+  if (supplementalCache && supplementalCache.key === cacheKey && Date.now() - supplementalCache.ts < SUPPLEMENTAL_TTL_MS) {
+    return supplementalCache.data;
+  }
+
+  const files = getRecentSessionFiles(afterDate);
+
+  const dailyMap = new Map<string, DailyActivity>();
+  const dailyModelMap = new Map<string, Record<string, number>>();
+  const modelUsage: SupplementalStats['modelUsage'] = {};
+  const hourCounts: Record<string, number> = {};
+  let totalSessions = 0;
+  let totalMessages = 0;
+  let totalTokens = 0;
+  let estimatedCost = 0;
+
+  for (const filePath of files) {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
+
+    let firstTimestamp = '';
+    let sessionCounted = false;
+
+    for (const line of lines) {
+      try {
+        const msg = JSON.parse(line) as SessionMessage;
+        if (!msg.timestamp) continue;
+
+        if (!firstTimestamp) firstTimestamp = msg.timestamp;
+
+        const msgDate = msg.timestamp.slice(0, 10);
+
+        // Only count messages strictly after the cache boundary day
+        if (afterDate && msgDate <= afterDate) continue;
+
+        // Count session once based on first qualifying message
+        if (!sessionCounted) {
+          totalSessions++;
+          sessionCounted = true;
+        }
+
+        const hour = msg.timestamp.slice(11, 13);
+
+        if (msg.type === 'user' || msg.type === 'assistant') {
+          totalMessages++;
+
+          // dailyActivity
+          let day = dailyMap.get(msgDate);
+          if (!day) {
+            day = { date: msgDate, messageCount: 0, sessionCount: 0, toolCallCount: 0 };
+            dailyMap.set(msgDate, day);
+          }
+          day.messageCount++;
+        }
+
+        if (msg.type === 'assistant') {
+          const model = msg.message?.model || '';
+          const usage = msg.message?.usage;
+
+          if (usage) {
+            const input = usage.input_tokens || 0;
+            const output = usage.output_tokens || 0;
+            const cacheRead = usage.cache_read_input_tokens || 0;
+            const cacheWrite = usage.cache_creation_input_tokens || 0;
+            const tokens = input + output + cacheRead + cacheWrite;
+            totalTokens += tokens;
+
+            const cost = calculateCost(model, input, output, cacheWrite, cacheRead);
+            estimatedCost += cost;
+
+            // modelUsage
+            if (model) {
+              if (!modelUsage[model]) {
+                modelUsage[model] = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
+              }
+              modelUsage[model].inputTokens += input;
+              modelUsage[model].outputTokens += output;
+              modelUsage[model].cacheReadInputTokens += cacheRead;
+              modelUsage[model].cacheCreationInputTokens += cacheWrite;
+            }
+
+            // dailyModelTokens
+            if (model) {
+              let dayModel = dailyModelMap.get(msgDate);
+              if (!dayModel) {
+                dayModel = {};
+                dailyModelMap.set(msgDate, dayModel);
+              }
+              dayModel[model] = (dayModel[model] || 0) + tokens;
+            }
+
+            // hourCounts
+            hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+          }
+
+          // tool calls
+          const content = msg.message?.content;
+          if (Array.isArray(content)) {
+            let toolCalls = 0;
+            for (const c of content) {
+              if (c && typeof c === 'object' && 'type' in c && c.type === 'tool_use') {
+                toolCalls++;
+              }
+            }
+            if (toolCalls > 0) {
+              const day = dailyMap.get(msgDate);
+              if (day) day.toolCallCount += toolCalls;
+            }
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    // Track session count per day (based on first qualifying message)
+    if (sessionCounted && firstTimestamp) {
+      // Find the first date that's after the cutoff
+      for (const line of lines) {
+        try {
+          const msg = JSON.parse(line) as SessionMessage;
+          if (!msg.timestamp) continue;
+          const d = msg.timestamp.slice(0, 10);
+          if (afterDate && d <= afterDate) continue;
+          const day = dailyMap.get(d);
+          if (day) day.sessionCount++;
+          break;
+        } catch { /* skip */ }
+      }
+    }
+  }
+
+  const dailyActivity = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const dailyModelTokens: DailyModelTokens[] = Array.from(dailyModelMap.entries())
+    .map(([date, tokensByModel]) => ({ date, tokensByModel }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const result: SupplementalStats = {
+    dailyActivity,
+    dailyModelTokens,
+    modelUsage,
+    hourCounts,
+    totalSessions,
+    totalMessages,
+    totalTokens,
+    estimatedCost,
+  };
+
+  supplementalCache = { key: cacheKey, data: result, ts: Date.now() };
+  return result;
+}
+
 export function getDashboardStats(): DashboardStats {
   const stats = getStatsCache();
   const projects = getProjects();
+  const afterDate = stats?.lastComputedDate || '';
 
+  // Compute supplemental stats from JSONL files modified after the cache date
+  const supplemental = computeSupplementalStats(afterDate);
+
+  // --- Base stats from cache ---
   let totalTokens = 0;
   let estimatedCost = 0;
   const modelUsageWithCost: Record<string, DashboardStats['modelUsage'][string]> = {};
@@ -443,17 +638,85 @@ export function getDashboardStats(): DashboardStats {
     }
   }
 
+  // --- Merge supplemental model usage ---
+  for (const [model, usage] of Object.entries(supplemental.modelUsage)) {
+    const cost = calculateCost(model, usage.inputTokens, usage.outputTokens, usage.cacheCreationInputTokens, usage.cacheReadInputTokens);
+    totalTokens += usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
+    estimatedCost += cost;
+    if (modelUsageWithCost[model]) {
+      modelUsageWithCost[model].inputTokens += usage.inputTokens;
+      modelUsageWithCost[model].outputTokens += usage.outputTokens;
+      modelUsageWithCost[model].cacheReadInputTokens += usage.cacheReadInputTokens;
+      modelUsageWithCost[model].cacheCreationInputTokens += usage.cacheCreationInputTokens;
+      modelUsageWithCost[model].estimatedCost += cost;
+    } else {
+      modelUsageWithCost[model] = {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadInputTokens: usage.cacheReadInputTokens,
+        cacheCreationInputTokens: usage.cacheCreationInputTokens,
+        costUSD: 0,
+        contextWindow: 0,
+        maxOutputTokens: 0,
+        webSearchRequests: 0,
+        estimatedCost: cost,
+      };
+    }
+  }
+
+  // --- Merge dailyActivity ---
+  const dailyActivityMap = new Map<string, DailyActivity>();
+  for (const d of (stats?.dailyActivity || [])) {
+    dailyActivityMap.set(d.date, { ...d });
+  }
+  for (const d of supplemental.dailyActivity) {
+    const existing = dailyActivityMap.get(d.date);
+    if (existing) {
+      existing.messageCount += d.messageCount;
+      existing.sessionCount += d.sessionCount;
+      existing.toolCallCount += d.toolCallCount;
+    } else {
+      dailyActivityMap.set(d.date, { ...d });
+    }
+  }
+  const mergedDailyActivity = Array.from(dailyActivityMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  // --- Merge dailyModelTokens ---
+  const dailyModelMap = new Map<string, Record<string, number>>();
+  for (const d of (stats?.dailyModelTokens || [])) {
+    dailyModelMap.set(d.date, { ...d.tokensByModel });
+  }
+  for (const d of supplemental.dailyModelTokens) {
+    const existing = dailyModelMap.get(d.date);
+    if (existing) {
+      for (const [model, tokens] of Object.entries(d.tokensByModel)) {
+        existing[model] = (existing[model] || 0) + tokens;
+      }
+    } else {
+      dailyModelMap.set(d.date, { ...d.tokensByModel });
+    }
+  }
+  const mergedDailyModelTokens = Array.from(dailyModelMap.entries())
+    .map(([date, tokensByModel]) => ({ date, tokensByModel }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // --- Merge hourCounts ---
+  const mergedHourCounts = { ...(stats?.hourCounts || {}) };
+  for (const [hour, count] of Object.entries(supplemental.hourCounts)) {
+    mergedHourCounts[hour] = (mergedHourCounts[hour] || 0) + count;
+  }
+
   const recentSessions = getSessions(10);
 
   return {
-    totalSessions: stats?.totalSessions || 0,
-    totalMessages: stats?.totalMessages || 0,
+    totalSessions: (stats?.totalSessions || 0) + supplemental.totalSessions,
+    totalMessages: (stats?.totalMessages || 0) + supplemental.totalMessages,
     totalTokens,
     estimatedCost,
-    dailyActivity: stats?.dailyActivity || [],
-    dailyModelTokens: stats?.dailyModelTokens || [],
+    dailyActivity: mergedDailyActivity,
+    dailyModelTokens: mergedDailyModelTokens,
     modelUsage: modelUsageWithCost,
-    hourCounts: stats?.hourCounts || {},
+    hourCounts: mergedHourCounts,
     firstSessionDate: stats?.firstSessionDate || '',
     longestSession: stats?.longestSession || { sessionId: '', duration: 0, messageCount: 0, timestamp: '' },
     projectCount: projects.length,

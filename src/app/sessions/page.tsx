@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useSessions } from '@/lib/hooks';
+import { useCostMode } from '@/lib/cost-mode-context';
 import { formatCost, formatDuration, timeAgo, formatTokens } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +40,7 @@ function SessionsContent() {
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const debouncedQuery = useDebounce(searchQuery, 300);
   const { data: sessions, isLoading } = useSessions(100, 0, debouncedQuery);
+  const { pickCost } = useCostMode();
 
   // Sync debounced query to URL
   useEffect(() => {
@@ -146,7 +148,7 @@ function SessionsContent() {
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0 ml-4">
-                  <p className="text-sm font-semibold">{formatCost(session.estimatedCost)}</p>
+                  <p className="text-sm font-semibold">{formatCost(pickCost(session.estimatedCosts, session.estimatedCost))}</p>
                   <p className="text-[10px] text-muted-foreground">{timeAgo(session.timestamp)}</p>
                 </div>
               </Link>

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Providers } from "@/components/providers";
 import { Sidebar } from "@/components/layout/sidebar";
 import "./globals.css";
 
@@ -29,14 +29,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <TooltipProvider>
+        <Providers>
           <Sidebar />
           <main className="ml-60 min-h-screen">
             <div className="mx-auto max-w-7xl px-6 py-6">
               {children}
             </div>
           </main>
-        </TooltipProvider>
+        </Providers>
       </body>
     </html>
   );

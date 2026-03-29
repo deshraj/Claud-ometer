@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import readline from 'readline';
-import { calculateCost, getModelDisplayName } from '@/config/pricing';
+import { calculateCostAllModes, getModelDisplayName, DEFAULT_COST_MODE } from '@/config/pricing';
 import { getActiveDataSource, getImportDir } from './data-source';
 import type {
   StatsCache,
@@ -16,7 +16,20 @@ import type {
   DailyModelTokens,
   TokenUsage,
   SessionMessage,
+  CostEstimates,
 } from './types';
+
+function zeroCosts(): CostEstimates {
+  return { api: 0, conservative: 0, subscription: 0 };
+}
+
+function addCosts(a: CostEstimates, b: CostEstimates): CostEstimates {
+  return {
+    api: a.api + b.api,
+    conservative: a.conservative + b.conservative,
+    subscription: a.subscription + b.subscription,
+  };
+}
 
 async function forEachJsonlLine(filePath: string, callback: (msg: SessionMessage) => void): Promise<void> {
   const fileStream = fs.createReadStream(filePath);
@@ -107,7 +120,7 @@ export async function getProjects(): Promise<ProjectInfo[]> {
 
     let totalMessages = 0;
     let totalTokens = 0;
-    let estimatedCost = 0;
+    let estimatedCosts = zeroCosts();
     let lastActive = '';
     const modelsSet = new Set<string>();
 
@@ -128,13 +141,14 @@ export async function getProjects(): Promise<ProjectInfo[]> {
             const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) +
               (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
             totalTokens += tokens;
-            estimatedCost += calculateCost(
+            const costs = calculateCostAllModes(
               model,
               usage.input_tokens || 0,
               usage.output_tokens || 0,
               usage.cache_creation_input_tokens || 0,
               usage.cache_read_input_tokens || 0
             );
+            estimatedCosts = addCosts(estimatedCosts, costs);
           }
         }
       });
@@ -150,7 +164,8 @@ export async function getProjects(): Promise<ProjectInfo[]> {
       sessionCount: jsonlFiles.length,
       totalMessages,
       totalTokens,
-      estimatedCost,
+      estimatedCost: estimatedCosts[DEFAULT_COST_MODE],
+      estimatedCosts,
       lastActive,
       models: Array.from(modelsSet).map(getModelDisplayName),
     });
@@ -205,7 +220,7 @@ async function parseSessionFile(filePath: string, projectId: string, projectName
   let totalOutputTokens = 0;
   let totalCacheReadTokens = 0;
   let totalCacheWriteTokens = 0;
-  let estimatedCost = 0;
+  let estimatedCosts = zeroCosts();
   let gitBranch = '';
   let cwd = '';
   let version = '';
@@ -255,13 +270,14 @@ async function parseSessionFile(filePath: string, projectId: string, projectName
         totalOutputTokens += usage.output_tokens || 0;
         totalCacheReadTokens += usage.cache_read_input_tokens || 0;
         totalCacheWriteTokens += usage.cache_creation_input_tokens || 0;
-        estimatedCost += calculateCost(
+        const costs = calculateCostAllModes(
           model,
           usage.input_tokens || 0,
           usage.output_tokens || 0,
           usage.cache_creation_input_tokens || 0,
           usage.cache_read_input_tokens || 0
         );
+        estimatedCosts = addCosts(estimatedCosts, costs);
       }
       const content = msg.message?.content;
       if (Array.isArray(content)) {
@@ -296,7 +312,8 @@ async function parseSessionFile(filePath: string, projectId: string, projectName
     totalOutputTokens,
     totalCacheReadTokens,
     totalCacheWriteTokens,
-    estimatedCost,
+    estimatedCost: estimatedCosts[DEFAULT_COST_MODE],
+    estimatedCosts,
     model: models[0] || 'unknown',
     models: models.map(getModelDisplayName),
     gitBranch,
@@ -458,15 +475,23 @@ export async function searchSessions(query: string, limit = 50): Promise<Session
 
 // --- Supplemental stats: bridge stale stats-cache.json with fresh JSONL data ---
 
+interface SupplementalModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  estimatedCosts: CostEstimates;
+}
+
 interface SupplementalStats {
   dailyActivity: DailyActivity[];
   dailyModelTokens: DailyModelTokens[];
-  modelUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>;
+  modelUsage: Record<string, SupplementalModelUsage>;
   hourCounts: Record<string, number>;
   totalSessions: number;
   totalMessages: number;
   totalTokens: number;
-  estimatedCost: number;
+  estimatedCosts: CostEstimates;
 }
 
 let supplementalCache: { key: string; data: SupplementalStats; ts: number } | null = null;
@@ -504,12 +529,13 @@ async function computeSupplementalStats(afterDate: string): Promise<Supplemental
 
   const dailyMap = new Map<string, DailyActivity>();
   const dailyModelMap = new Map<string, Record<string, number>>();
-  const modelUsage: SupplementalStats['modelUsage'] = {};
+  const dailyModelCostMap = new Map<string, Record<string, CostEstimates>>();
+  const modelUsage: Record<string, SupplementalModelUsage> = {};
   const hourCounts: Record<string, number> = {};
   let totalSessions = 0;
   let totalMessages = 0;
   let totalTokens = 0;
-  let estimatedCost = 0;
+  let estimatedCosts = zeroCosts();
 
   for (const filePath of files) {
     let firstTimestamp = '';
@@ -559,21 +585,22 @@ async function computeSupplementalStats(afterDate: string): Promise<Supplemental
           const tokens = input + output + cacheRead + cacheWrite;
           totalTokens += tokens;
 
-          const cost = calculateCost(model, input, output, cacheWrite, cacheRead);
-          estimatedCost += cost;
+          const costs = calculateCostAllModes(model, input, output, cacheWrite, cacheRead);
+          estimatedCosts = addCosts(estimatedCosts, costs);
 
           // modelUsage
           if (model) {
             if (!modelUsage[model]) {
-              modelUsage[model] = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
+              modelUsage[model] = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, estimatedCosts: zeroCosts() };
             }
             modelUsage[model].inputTokens += input;
             modelUsage[model].outputTokens += output;
             modelUsage[model].cacheReadInputTokens += cacheRead;
             modelUsage[model].cacheCreationInputTokens += cacheWrite;
+            modelUsage[model].estimatedCosts = addCosts(modelUsage[model].estimatedCosts, costs);
           }
 
-          // dailyModelTokens
+          // dailyModelTokens + dailyModelCosts
           if (model) {
             let dayModel = dailyModelMap.get(msgDate);
             if (!dayModel) {
@@ -581,6 +608,13 @@ async function computeSupplementalStats(afterDate: string): Promise<Supplemental
               dailyModelMap.set(msgDate, dayModel);
             }
             dayModel[model] = (dayModel[model] || 0) + tokens;
+
+            let dayCost = dailyModelCostMap.get(msgDate);
+            if (!dayCost) {
+              dayCost = {};
+              dailyModelCostMap.set(msgDate, dayCost);
+            }
+            dayCost[model] = dayCost[model] ? addCosts(dayCost[model], costs) : { ...costs };
           }
 
           // hourCounts
@@ -613,7 +647,11 @@ async function computeSupplementalStats(afterDate: string): Promise<Supplemental
 
   const dailyActivity = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
   const dailyModelTokens: DailyModelTokens[] = Array.from(dailyModelMap.entries())
-    .map(([date, tokensByModel]) => ({ date, tokensByModel }))
+    .map(([date, tokensByModel]) => ({
+      date,
+      tokensByModel,
+      costsByModel: dailyModelCostMap.get(date) || {},
+    }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const result: SupplementalStats = {
@@ -624,7 +662,7 @@ async function computeSupplementalStats(afterDate: string): Promise<Supplemental
     totalSessions,
     totalMessages,
     totalTokens,
-    estimatedCost,
+    estimatedCosts,
   };
 
   supplementalCache = { key: cacheKey, data: result, ts: Date.now() };
@@ -641,12 +679,12 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   // --- Base stats from cache ---
   let totalTokens = 0;
-  let estimatedCost = 0;
+  let totalEstimatedCosts = zeroCosts();
   const modelUsageWithCost: Record<string, DashboardStats['modelUsage'][string]> = {};
 
   if (stats?.modelUsage) {
     for (const [model, usage] of Object.entries(stats.modelUsage)) {
-      const cost = calculateCost(
+      const costs = calculateCostAllModes(
         model,
         usage.inputTokens,
         usage.outputTokens,
@@ -655,22 +693,23 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       );
       const tokens = usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
       totalTokens += tokens;
-      estimatedCost += cost;
-      modelUsageWithCost[model] = { ...usage, estimatedCost: cost };
+      totalEstimatedCosts = addCosts(totalEstimatedCosts, costs);
+      modelUsageWithCost[model] = { ...usage, estimatedCost: costs[DEFAULT_COST_MODE], estimatedCosts: costs };
     }
   }
 
   // --- Merge supplemental model usage ---
   for (const [model, usage] of Object.entries(supplemental.modelUsage)) {
-    const cost = calculateCost(model, usage.inputTokens, usage.outputTokens, usage.cacheCreationInputTokens, usage.cacheReadInputTokens);
+    const costs = usage.estimatedCosts;
     totalTokens += usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
-    estimatedCost += cost;
+    totalEstimatedCosts = addCosts(totalEstimatedCosts, costs);
     if (modelUsageWithCost[model]) {
       modelUsageWithCost[model].inputTokens += usage.inputTokens;
       modelUsageWithCost[model].outputTokens += usage.outputTokens;
       modelUsageWithCost[model].cacheReadInputTokens += usage.cacheReadInputTokens;
       modelUsageWithCost[model].cacheCreationInputTokens += usage.cacheCreationInputTokens;
-      modelUsageWithCost[model].estimatedCost += cost;
+      modelUsageWithCost[model].estimatedCost += costs[DEFAULT_COST_MODE];
+      modelUsageWithCost[model].estimatedCosts = addCosts(modelUsageWithCost[model].estimatedCosts, costs);
     } else {
       modelUsageWithCost[model] = {
         inputTokens: usage.inputTokens,
@@ -681,7 +720,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
         contextWindow: 0,
         maxOutputTokens: 0,
         webSearchRequests: 0,
-        estimatedCost: cost,
+        estimatedCost: costs[DEFAULT_COST_MODE],
+        estimatedCosts: costs,
       };
     }
   }
@@ -703,23 +743,60 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   }
   const mergedDailyActivity = Array.from(dailyActivityMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-  // --- Merge dailyModelTokens ---
-  const dailyModelMap = new Map<string, Record<string, number>>();
-  for (const d of (stats?.dailyModelTokens || [])) {
-    dailyModelMap.set(d.date, { ...d.tokensByModel });
-  }
-  for (const d of supplemental.dailyModelTokens) {
-    const existing = dailyModelMap.get(d.date);
-    if (existing) {
-      for (const [model, tokens] of Object.entries(d.tokensByModel)) {
-        existing[model] = (existing[model] || 0) + tokens;
-      }
-    } else {
-      dailyModelMap.set(d.date, { ...d.tokensByModel });
+  // --- Merge dailyModelTokens (with costsByModel) ---
+  // Build per-model cost-per-token ratios from overall model usage (for cache days without pre-computed costs)
+  const modelCostPerToken: Record<string, CostEstimates> = {};
+  for (const [model, usage] of Object.entries(modelUsageWithCost)) {
+    const totalTok = usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
+    if (totalTok > 0 && usage.estimatedCosts) {
+      modelCostPerToken[model] = {
+        api: usage.estimatedCosts.api / totalTok,
+        conservative: usage.estimatedCosts.conservative / totalTok,
+        subscription: usage.estimatedCosts.subscription / totalTok,
+      };
     }
   }
-  const mergedDailyModelTokens = Array.from(dailyModelMap.entries())
-    .map(([date, tokensByModel]) => ({ date, tokensByModel }))
+
+  const dailyModelTokenMap = new Map<string, Record<string, number>>();
+  const dailyModelCostMergeMap = new Map<string, Record<string, CostEstimates>>();
+
+  for (const d of (stats?.dailyModelTokens || [])) {
+    dailyModelTokenMap.set(d.date, { ...d.tokensByModel });
+    // Estimate costs for cache-sourced days using per-model ratio
+    const dayCosts: Record<string, CostEstimates> = {};
+    for (const [model, tokens] of Object.entries(d.tokensByModel)) {
+      const ratio = modelCostPerToken[model];
+      if (ratio) {
+        dayCosts[model] = { api: tokens * ratio.api, conservative: tokens * ratio.conservative, subscription: tokens * ratio.subscription };
+      }
+    }
+    dailyModelCostMergeMap.set(d.date, dayCosts);
+  }
+
+  for (const d of supplemental.dailyModelTokens) {
+    const existingTokens = dailyModelTokenMap.get(d.date);
+    const existingCosts = dailyModelCostMergeMap.get(d.date);
+    if (existingTokens) {
+      for (const [model, tokens] of Object.entries(d.tokensByModel)) {
+        existingTokens[model] = (existingTokens[model] || 0) + tokens;
+      }
+      if (d.costsByModel && existingCosts) {
+        for (const [model, costs] of Object.entries(d.costsByModel)) {
+          existingCosts[model] = existingCosts[model] ? addCosts(existingCosts[model], costs) : { ...costs };
+        }
+      }
+    } else {
+      dailyModelTokenMap.set(d.date, { ...d.tokensByModel });
+      dailyModelCostMergeMap.set(d.date, d.costsByModel ? { ...d.costsByModel } : {});
+    }
+  }
+
+  const mergedDailyModelTokens: DailyModelTokens[] = Array.from(dailyModelTokenMap.entries())
+    .map(([date, tokensByModel]) => ({
+      date,
+      tokensByModel,
+      costsByModel: dailyModelCostMergeMap.get(date) || {},
+    }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   // --- Merge hourCounts ---
@@ -731,14 +808,20 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const recentSessions = await getSessions(10);
 
   // Use project-level totals for cost/tokens to stay consistent with the Projects page
-  const projectTotalCost = projects.reduce((sum, p) => sum + p.estimatedCost, 0);
+  const projectTotalCosts: CostEstimates = projects.reduce(
+    (sum, p) => addCosts(sum, p.estimatedCosts || { api: p.estimatedCost, conservative: p.estimatedCost, subscription: p.estimatedCost }),
+    zeroCosts()
+  );
   const projectTotalTokens = projects.reduce((sum, p) => sum + p.totalTokens, 0);
+
+  const finalCosts = projectTotalCosts.api > 0 ? projectTotalCosts : totalEstimatedCosts;
 
   return {
     totalSessions: (stats?.totalSessions || 0) + supplemental.totalSessions,
     totalMessages: (stats?.totalMessages || 0) + supplemental.totalMessages,
     totalTokens: projectTotalTokens || totalTokens,
-    estimatedCost: projectTotalCost || estimatedCost,
+    estimatedCost: finalCosts[DEFAULT_COST_MODE],
+    estimatedCosts: finalCosts,
     dailyActivity: mergedDailyActivity,
     dailyModelTokens: mergedDailyModelTokens,
     modelUsage: modelUsageWithCost,

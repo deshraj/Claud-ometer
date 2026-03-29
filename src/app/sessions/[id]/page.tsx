@@ -2,6 +2,7 @@
 
 import { use } from 'react';
 import { useSessionDetail } from '@/lib/hooks';
+import { useCostMode } from '@/lib/cost-mode-context';
 import { formatCost, formatDuration, formatTokens } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +17,7 @@ import { format } from 'date-fns';
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: session, isLoading, error } = useSessionDetail(id);
+  const { pickCost } = useCostMode();
 
   if (isLoading || !session || !session.id) {
     return (
@@ -107,8 +109,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         <Card className="border-border/50 shadow-sm">
           <CardContent className="p-3 text-center">
             <Coins className="h-3.5 w-3.5 mx-auto mb-1 text-muted-foreground" />
-            <p className="text-lg font-bold">{formatCost(session.estimatedCost)}</p>
-            <p className="text-[10px] text-muted-foreground">Est. Cost</p>
+            <p className="text-lg font-bold">{formatCost(pickCost(session.estimatedCosts, session.estimatedCost))}</p>
+            <p className="text-[10px] text-muted-foreground">Est. Usage</p>
           </CardContent>
         </Card>
         <Card className={`border-border/50 shadow-sm ${compactionCount > 0 ? 'border-amber-300/50 bg-amber-50/30' : ''}`}>

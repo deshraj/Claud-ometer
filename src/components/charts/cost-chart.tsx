@@ -5,7 +5,8 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { DailyModelTokens } from '@/lib/claude-data/types';
-import { calculateCost, getModelDisplayName, getModelColor } from '@/config/pricing';
+import { getModelDisplayName, getModelColor } from '@/config/pricing';
+import { useCostMode } from '@/lib/cost-mode-context';
 import { format, parseISO } from 'date-fns';
 
 interface CostChartProps {
@@ -13,6 +14,8 @@ interface CostChartProps {
 }
 
 export function CostChart({ data }: CostChartProps) {
+  const { costMode } = useCostMode();
+
   const allModels = new Set<string>();
   data.forEach(d => Object.keys(d.tokensByModel).forEach(m => allModels.add(m)));
 
@@ -21,9 +24,14 @@ export function CostChart({ data }: CostChartProps) {
       date: format(parseISO(d.date), 'MMM d'),
     };
     for (const model of allModels) {
-      const tokens = d.tokensByModel[model] || 0;
-      const cost = calculateCost(model, tokens * 0.1, tokens * 0.05, tokens * 0.5, tokens * 0.35);
-      entry[getModelDisplayName(model)] = parseFloat(cost.toFixed(2));
+      const displayName = getModelDisplayName(model);
+      const costs = d.costsByModel?.[model];
+      if (costs) {
+        entry[displayName] = parseFloat((costs[costMode] ?? 0).toFixed(2));
+      } else {
+        // Fallback: no pre-computed costs (should not happen with updated data)
+        entry[displayName] = 0;
+      }
     }
     return entry;
   });
@@ -38,7 +46,7 @@ export function CostChart({ data }: CostChartProps) {
   return (
     <Card className="border-border/50 shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">Cost Over Time</CardTitle>
+        <CardTitle className="text-sm font-semibold">Estimated Usage Over Time</CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
         <div className="h-[300px]">

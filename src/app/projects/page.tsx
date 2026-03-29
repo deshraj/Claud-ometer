@@ -1,6 +1,7 @@
 'use client';
 
 import { useProjects } from '@/lib/hooks';
+import { useCostMode } from '@/lib/cost-mode-context';
 import { formatTokens, formatCost, timeAgo } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,7 @@ import Link from 'next/link';
 
 export default function ProjectsPage() {
   const { data: projects, isLoading } = useProjects();
+  const { pickCost } = useCostMode();
 
   if (isLoading || !projects) {
     return (
@@ -68,8 +70,8 @@ export default function ProjectsPage() {
                       <p className="text-[10px] text-muted-foreground">tokens</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-lg font-bold">{formatCost(project.estimatedCost)}</p>
-                      <p className="text-[10px] text-muted-foreground">cost</p>
+                      <p className="text-lg font-bold">{formatCost(pickCost(project.estimatedCosts, project.estimatedCost))}</p>
+                      <p className="text-[10px] text-muted-foreground">est. usage</p>
                     </div>
                   </div>
 

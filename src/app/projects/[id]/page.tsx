@@ -2,6 +2,7 @@
 
 import { use } from 'react';
 import { useProjectSessions } from '@/lib/hooks';
+import { useCostMode } from '@/lib/cost-mode-context';
 import { formatTokens, formatCost, formatDuration, timeAgo } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +13,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const { id } = use(params);
   const projectId = decodeURIComponent(id);
   const { data: sessions, isLoading } = useProjectSessions(projectId);
+  const { pickCost } = useCostMode();
 
   const projectName = projectId.split('-').pop() || projectId;
 
@@ -27,7 +29,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const totalMessages = sessions.reduce((sum, s) => sum + s.messageCount, 0);
-  const totalCost = sessions.reduce((sum, s) => sum + s.estimatedCost, 0);
+  const totalCost = sessions.reduce((sum, s) => sum + pickCost(s.estimatedCosts, s.estimatedCost), 0);
   const totalToolCalls = sessions.reduce((sum, s) => sum + s.toolCallCount, 0);
 
   // Aggregate tool usage across sessions
@@ -78,7 +80,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         <Card className="border-border/50 shadow-sm">
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold">{formatCost(totalCost)}</p>
-            <p className="text-xs text-muted-foreground">Est. Cost</p>
+            <p className="text-xs text-muted-foreground">Est. Usage</p>
           </CardContent>
         </Card>
       </div>
@@ -147,7 +149,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs font-medium">{formatCost(session.estimatedCost)}</p>
+                  <p className="text-xs font-medium">{formatCost(pickCost(session.estimatedCosts, session.estimatedCost))}</p>
                   <p className="text-[10px] text-muted-foreground">{timeAgo(session.timestamp)}</p>
                 </div>
               </Link>

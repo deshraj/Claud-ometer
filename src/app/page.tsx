@@ -1,6 +1,8 @@
 'use client';
 
 import { useStats } from '@/lib/hooks';
+import { useCostMode } from '@/lib/cost-mode-context';
+import { CostModeSelector } from '@/components/cost-mode-selector';
 import { StatCard } from '@/components/cards/stat-card';
 import { UsageOverTime } from '@/components/charts/usage-over-time';
 import { ModelBreakdown } from '@/components/charts/model-breakdown';
@@ -21,6 +23,7 @@ import Link from 'next/link';
 
 export default function DashboardPage() {
   const { data: stats, isLoading } = useStats();
+  const { pickCost, label: modeLabel } = useCostMode();
 
   if (isLoading || !stats) {
     return (
@@ -35,9 +38,12 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Overview</h1>
-        <p className="text-sm text-muted-foreground">Your Claude Code usage at a glance</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Overview</h1>
+          <p className="text-sm text-muted-foreground">Your Claude Code usage at a glance</p>
+        </div>
+        <CostModeSelector />
       </div>
 
       {/* Hero Stats */}
@@ -59,9 +65,9 @@ export default function DashboardPage() {
           icon={Activity}
         />
         <StatCard
-          title="Estimated Cost"
-          value={formatCost(stats.estimatedCost)}
-          subtitle="based on API pricing"
+          title="Estimated Usage"
+          value={formatCost(pickCost(stats.estimatedCosts, stats.estimatedCost))}
+          subtitle={modeLabel.name.toLowerCase() + ' estimate'}
           icon={Coins}
         />
       </div>
@@ -129,7 +135,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs font-medium">{formatCost(session.estimatedCost)}</p>
+                  <p className="text-xs font-medium">{formatCost(pickCost(session.estimatedCosts, session.estimatedCost))}</p>
                   <p className="text-[10px] text-muted-foreground">{timeAgo(session.timestamp)}</p>
                 </div>
               </Link>

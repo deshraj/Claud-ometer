@@ -1,20 +1,23 @@
 'use client';
 
 import { useStats, useProjects } from '@/lib/hooks';
+import { useCostMode } from '@/lib/cost-mode-context';
+import { CostModeSelector } from '@/components/cost-mode-selector';
 import { StatCard } from '@/components/cards/stat-card';
 import { CostChart } from '@/components/charts/cost-chart';
 import { formatCost, formatTokens } from '@/lib/format';
-import { calculateCost, getModelDisplayName, getModelColor, MODEL_PRICING } from '@/config/pricing';
-import { Coins, TrendingUp, Zap, Database } from 'lucide-react';
+import { getModelDisplayName, getModelColor, MODEL_PRICING } from '@/config/pricing';
+import { Coins, TrendingUp, Zap, Database, Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 
 export default function CostsPage() {
   const { data: stats, isLoading: statsLoading } = useStats();
   const { data: projects, isLoading: projectsLoading } = useProjects();
+  const { costMode, pickCost, label: modeLabel } = useCostMode();
 
   if (statsLoading || projectsLoading || !stats || !projects) {
     return (
@@ -51,21 +54,27 @@ export default function CostsPage() {
     }
   });
 
+  const totalCost = pickCost(stats.estimatedCosts, stats.estimatedCost);
+
   // Cost by project
   const projectCosts = projects
-    .filter(p => p.estimatedCost > 0)
-    .sort((a, b) => b.estimatedCost - a.estimatedCost)
+    .filter(p => (p.estimatedCosts ? pickCost(p.estimatedCosts) : p.estimatedCost) > 0)
+    .sort((a, b) => {
+      const costA = a.estimatedCosts ? pickCost(a.estimatedCosts) : a.estimatedCost;
+      const costB = b.estimatedCosts ? pickCost(b.estimatedCosts) : b.estimatedCost;
+      return costB - costA;
+    })
     .slice(0, 10)
     .map(p => ({
       name: p.name,
-      cost: parseFloat(p.estimatedCost.toFixed(2)),
+      cost: parseFloat((p.estimatedCosts ? pickCost(p.estimatedCosts) : p.estimatedCost).toFixed(2)),
     }));
 
   // Model cost breakdown
   const modelCosts = Object.entries(stats.modelUsage).map(([model, usage]) => ({
     name: getModelDisplayName(model),
     model,
-    cost: usage.estimatedCost,
+    cost: pickCost(usage.estimatedCosts, usage.estimatedCost),
     color: getModelColor(model),
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
@@ -75,16 +84,31 @@ export default function CostsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Cost Analytics</h1>
-        <p className="text-sm text-muted-foreground">Understand your Claude Code spending</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Cost Analytics</h1>
+          <p className="text-sm text-muted-foreground">Estimated usage costs — not actual billing</p>
+        </div>
+        <CostModeSelector />
+      </div>
+
+      {/* Mode explainer */}
+      <div className="flex items-start gap-2 rounded-lg border border-border/50 bg-muted/30 px-4 py-3">
+        <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+        <div className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{modeLabel.name}:</span>{' '}
+          {modeLabel.description}.{' '}
+          {costMode === 'api' && 'This shows what your usage would cost at published API rates — typically 5-8x higher than subscription billing.'}
+          {costMode === 'conservative' && 'Cache tokens are discounted but not eliminated. This is an upper-bound estimate for subscription users.'}
+          {costMode === 'subscription' && 'Cache tokens are heavily discounted to approximate real Claude Code plan billing. Best match for $100/mo + overage plans.'}
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
         <StatCard
-          title="Total Estimated Cost"
-          value={formatCost(stats.estimatedCost)}
-          subtitle="all time"
+          title="Estimated Usage"
+          value={formatCost(totalCost)}
+          subtitle={modeLabel.name.toLowerCase() + ' estimate'}
           icon={Coins}
         />
         <StatCard
@@ -112,7 +136,7 @@ export default function CostsPage() {
         {/* Cost by Project */}
         <Card className="border-border/50 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">Cost by Project</CardTitle>
+            <CardTitle className="text-sm font-semibold">Estimated Cost by Project</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="h-[300px]">
@@ -145,7 +169,7 @@ export default function CostsPage() {
                       borderRadius: '8px',
                       fontSize: '12px',
                     }}
-                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Cost']}
+                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Est. Cost']}
                   />
                   <Bar dataKey="cost" fill="var(--primary)" radius={[0, 4, 4, 0]} />
                 </BarChart>
@@ -157,7 +181,7 @@ export default function CostsPage() {
         {/* Model Cost Breakdown */}
         <Card className="border-border/50 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold">Cost by Model</CardTitle>
+            <CardTitle className="text-sm font-semibold">Estimated Cost by Model</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="space-y-4">
@@ -198,7 +222,7 @@ export default function CostsPage() {
                 </div>
                 <Separator />
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground font-medium">Estimated Savings</span>
+                  <span className="text-muted-foreground font-medium">API-Rate Savings</span>
                   <span className="font-bold text-green-600">{formatCost(cacheSavings)}</span>
                 </div>
               </div>
@@ -210,7 +234,7 @@ export default function CostsPage() {
       {/* Pricing Reference */}
       <Card className="border-border/50 shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold">Pricing Reference (per 1M tokens)</CardTitle>
+          <CardTitle className="text-sm font-semibold">Pricing Reference (per 1M tokens, API rates)</CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="overflow-x-auto">
@@ -237,6 +261,9 @@ export default function CostsPage() {
               </tbody>
             </table>
           </div>
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            These are published API rates. Claude Code subscription billing differs significantly — cache tokens are not billed at full API rates.
+          </p>
         </CardContent>
       </Card>
     </div>

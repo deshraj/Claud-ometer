@@ -3,10 +3,11 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getModelDisplayName, getModelColor } from '@/config/pricing';
-import type { ModelUsage } from '@/lib/claude-data/types';
+import { useCostMode } from '@/lib/cost-mode-context';
+import type { ModelUsage, CostEstimates } from '@/lib/claude-data/types';
 
 interface ModelBreakdownProps {
-  data: Record<string, ModelUsage & { estimatedCost: number }>;
+  data: Record<string, ModelUsage & { estimatedCost: number; estimatedCosts?: CostEstimates }>;
 }
 
 function formatTokens(n: number): string {
@@ -17,11 +18,12 @@ function formatTokens(n: number): string {
 }
 
 export function ModelBreakdown({ data }: ModelBreakdownProps) {
+  const { pickCost } = useCostMode();
   const chartData = Object.entries(data).map(([model, usage]) => ({
     name: getModelDisplayName(model),
     model,
     tokens: usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
-    cost: usage.estimatedCost,
+    cost: pickCost(usage.estimatedCosts, usage.estimatedCost),
     color: getModelColor(model),
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,

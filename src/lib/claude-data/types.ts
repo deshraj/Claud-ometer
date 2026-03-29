@@ -1,3 +1,8 @@
+import type { CostMode } from '@/config/pricing';
+
+/** Cost estimates in all three modes */
+export type CostEstimates = Record<CostMode, number>;
+
 export interface DailyActivity {
   date: string;
   messageCount: number;
@@ -8,6 +13,8 @@ export interface DailyActivity {
 export interface DailyModelTokens {
   date: string;
   tokensByModel: Record<string, number>;
+  /** Pre-computed daily cost per model in each cost mode */
+  costsByModel?: Record<string, CostEstimates>;
 }
 
 export interface ModelUsage {
@@ -110,6 +117,7 @@ export interface ProjectInfo {
   totalMessages: number;
   totalTokens: number;
   estimatedCost: number;
+  estimatedCosts: CostEstimates;
   lastActive: string;
   models: string[];
 }
@@ -136,6 +144,7 @@ export interface SessionInfo {
   totalCacheReadTokens: number;
   totalCacheWriteTokens: number;
   estimatedCost: number;
+  estimatedCosts: CostEstimates;
   model: string;
   models: string[];
   gitBranch: string;
@@ -163,9 +172,10 @@ export interface DashboardStats {
   totalMessages: number;
   totalTokens: number;
   estimatedCost: number;
+  estimatedCosts: CostEstimates;
   dailyActivity: DailyActivity[];
   dailyModelTokens: DailyModelTokens[];
-  modelUsage: Record<string, ModelUsage & { estimatedCost: number }>;
+  modelUsage: Record<string, ModelUsage & { estimatedCost: number; estimatedCosts: CostEstimates }>;
   hourCounts: Record<string, number>;
   firstSessionDate: string;
   longestSession: LongestSession;

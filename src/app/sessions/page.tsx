@@ -44,7 +44,7 @@ function SessionsContent() {
 
   // Sync debounced query to URL
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
     if (debouncedQuery) {
       params.set('q', debouncedQuery);
     } else {
@@ -52,7 +52,7 @@ function SessionsContent() {
     }
     const qs = params.toString();
     router.replace(qs ? `/sessions?${qs}` : '/sessions', { scroll: false });
-  }, [debouncedQuery, router, searchParams]);
+  }, [debouncedQuery, router]);
 
   if (isLoading || !sessions) {
     return (

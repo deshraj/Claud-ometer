@@ -6,6 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:bg": "powershell -ExecutionPolicy Bypass -File scripts/start-bg.ps1",
+    "stop": "powershell -ExecutionPolicy Bypass -File scripts/start-bg.ps1 stop",
+    "status": "powershell -ExecutionPolicy Bypass -File scripts/start-bg.ps1 status",
     "lint": "eslint"
   },
   "dependencies": {

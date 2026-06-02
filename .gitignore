@@ -47,5 +47,8 @@ next-env.d.ts
 # temp files
 /tmp/
 
+# background process
+scripts/.claud-ometer.*
+
 ### IntelliJ IDEA ###
 .idea

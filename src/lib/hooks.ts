@@ -1,5 +1,6 @@
 import useSWR, { mutate as globalMutate } from 'swr';
 import type { DashboardStats, ProjectInfo, SessionInfo, SessionDetail } from '@/lib/claude-data/types';
+import type { ObsidianProject } from '@/lib/obsidian/reader';
 
 const fetcher = (url: string) => fetch(url).then(r => {
   if (!r.ok) throw new Error(`API error: ${r.status}`);
@@ -27,6 +28,25 @@ export function useProjectSessions(projectId: string) {
 
 export function useSessionDetail(sessionId: string) {
   return useSWR<SessionDetail>(`/api/sessions/${sessionId}`, fetcher);
+}
+
+export function useObsidianProjects() {
+  const swr = useSWR<{ enabled: boolean; projects: ObsidianProject[] }>('/api/obsidian', fetcher, {
+    refreshInterval: 30000,
+  });
+
+  const mutateObsidian = async (action: string, payload: Record<string, unknown>) => {
+    const res = await fetch('/api/obsidian', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    if (!res.ok) throw new Error('Mutation failed');
+    const data = await res.json();
+    swr.mutate(data, false);
+  };
+
+  return { ...swr, mutateObsidian };
 }
 
 export interface WatcherState {

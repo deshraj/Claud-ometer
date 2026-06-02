@@ -111,11 +111,23 @@ Use `grid grid-cols-N gap-3` with `<Card>` children for stat rows.
 ### Icons
 Always use Lucide. Typical sizing: `h-3 w-3` (inline), `h-3.5 w-3.5` (card headers), `h-4 w-4` (buttons/nav).
 
+## Obsidian Integration
+
+The Plans page reads markdown files from the user's Obsidian vault:
+- **Vault root**: `C:\Users\Timf\Documents\Obsidian_Vault\`
+- **Projects dir**: `MySelf\Projects\` — project notes with YAML frontmatter (`tags`, `points` for priority)
+- **Documentation**: `MySelf\Projects\Документация\` — detailed docs (JobHunt etc.)
+- Parsed: frontmatter tags/points, `- [ ]`/`- [x]` checkboxes, content preview
+- Watcher toggle in sidebar controls whether Obsidian data is fetched
+
 ## Commands
 
 ```bash
 npm run dev       # Dev server (Turbopack)
 npm run build     # Production build
 npm start         # Production server
+npm run start:bg  # Build + start as background process (Windows)
+npm run stop      # Stop background process
+npm run status    # Check if background process is running
 npm run lint      # ESLint
 ```

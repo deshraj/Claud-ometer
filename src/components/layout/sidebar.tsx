@@ -10,16 +10,18 @@ import {
   DollarSign,
   Terminal,
   Database,
+  ListTodo,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { WatcherToggles } from '@/components/watcher-toggles';
 
 const navItems = [
+  { href: '/plans', label: 'Plans', icon: ListTodo },
   { href: '/', label: 'Overview', icon: LayoutDashboard },
+  { href: '/costs', label: 'Costs', icon: DollarSign },
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/sessions', label: 'Sessions', icon: MessageSquare },
-  { href: '/costs', label: 'Costs', icon: DollarSign },
   { href: '/data', label: 'Data', icon: Database },
 ];
 

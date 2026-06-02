@@ -11,6 +11,7 @@ import {
   Terminal,
   Database,
   ListTodo,
+  Briefcase,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ const navItems = [
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/sessions', label: 'Sessions', icon: MessageSquare },
   { href: '/data', label: 'Data', icon: Database },
+  { href: '/jobhunt', label: 'JobHunt', icon: Briefcase },
 ];
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());

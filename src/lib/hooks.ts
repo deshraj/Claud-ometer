@@ -1,4 +1,4 @@
-import useSWR from 'swr';
+import useSWR, { mutate as globalMutate } from 'swr';
 import type { DashboardStats, ProjectInfo, SessionInfo, SessionDetail } from '@/lib/claude-data/types';
 
 const fetcher = (url: string) => fetch(url).then(r => {
@@ -27,4 +27,26 @@ export function useProjectSessions(projectId: string) {
 
 export function useSessionDetail(sessionId: string) {
   return useSWR<SessionDetail>(`/api/sessions/${sessionId}`, fetcher);
+}
+
+export interface WatcherState {
+  claude: boolean;
+  obsidian: boolean;
+}
+
+export function useWatchers() {
+  const swr = useSWR<WatcherState>('/api/watchers', fetcher, { refreshInterval: 5000 });
+
+  const toggle = async (key: keyof WatcherState) => {
+    if (!swr.data) return;
+    const updated = { ...swr.data, [key]: !swr.data[key] };
+    await fetch('/api/watchers', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    });
+    globalMutate('/api/watchers');
+  };
+
+  return { ...swr, toggle };
 }

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { WatcherToggles } from '@/components/watcher-toggles';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -63,6 +64,10 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="border-t border-border px-3 py-3">
+        <WatcherToggles />
+      </div>
 
       <div className="border-t border-border px-5 py-3">
         {isImported ? (
